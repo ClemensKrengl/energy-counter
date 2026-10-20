@@ -485,7 +485,7 @@
           <span class="what">${esc(label(e))}
             <span class="meta">${esc(e.person)}, ${fmt.format(new Date(e.ts))}</span></span>
           <span class="eur">${euro(e.cents)}</span>
-          <button class="link" data-id="${e.id}" type="button">Löschen</button>
+          <button class="link" data-id="${esc(e.id)}" type="button">Löschen</button>
         </li>`).join("")
       : `<li class="zero"><span>Hier erscheinen die zuletzt eingetragenen Dosen.</span></li>`;
     $("more").hidden = recent.length <= LOG_SHORT;
