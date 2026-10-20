@@ -114,9 +114,9 @@
   .more { margin-top: 12px; }
 
   footer { display: flex; gap: 20px; font-size: .875rem; }
-  body[data-role="submitter"] .counter, body:not([data-role="submitter"]) #mine { display: none; }
+  body:not([data-role="submitter"]) #mine { display: none; }
+  body[data-role="submitter"] #history [data-id], body[data-role="submitter"] #import { display: none; }
   .note { margin: 0 0 8px; color: var(--muted); }
-  body[data-role="submitter"] form { margin-top: 32px; }
   #review-list li { grid-template-columns: 1fr auto; }
   .actions { grid-column: 1 / -1; display: flex; gap: 20px; }
   .log .actions .link:first-child:hover { color: var(--live); }
@@ -163,8 +163,8 @@
   </section>
 
   <div id="app">
-  <div class="shelf counter" id="shelf" aria-label="Alle getrunkenen Dosen"></div>
-  <div class="totals counter" id="totals"></div>
+  <div class="shelf" id="shelf" aria-label="Alle getrunkenen Dosen"></div>
+  <div class="totals" id="totals"></div>
 
   <form id="add">
     <label>Wer
@@ -190,23 +190,23 @@
     <ul class="rows log" id="mine-list"></ul>
   </section>
 
-  <section class="counter">
+  <section>
     <h2 class="narrow">Marken</h2>
     <ul class="rows" id="brands"></ul>
   </section>
 
-  <section class="counter">
+  <section>
     <h2 class="narrow">Leute</h2>
     <ul class="rows" id="people"></ul>
   </section>
 
-  <section class="counter">
+  <section>
     <h2 class="narrow">Zuletzt</h2>
     <ul class="rows log" id="history"></ul>
     <button class="link more" id="more" type="button" hidden></button>
   </section>
 
-  <footer class="counter">
+  <footer>
     <button class="link" id="export" type="button">Daten exportieren</button>
     <button class="link" id="import" type="button">Daten importieren</button>
     <input type="file" id="importFile" accept="application/json" hidden>
@@ -363,8 +363,7 @@
     const id = ++session;
     closeStreams();
     if (role === "submitter") {
-      watch(`/pending/${auth.currentUser.uid}`, id, (data) => { mine = data; setAuthState("in"); renderMine(); });
-      return;
+      watch(`/pending/${auth.currentUser.uid}`, id, (data) => { mine = data; renderMine(); });
     }
     watch("/entries", id, (data) => {
       store = data;
