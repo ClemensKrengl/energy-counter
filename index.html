@@ -133,6 +133,44 @@
   .state.abgelehnt { color: var(--danger); }
   .account { margin: 12px 0 0; font-size: .875rem; color: var(--muted); }
 
+  /* Daily Bild: a month calendar with one picture per day */
+  .cal-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .cal-head h2 { margin: 0; }
+  .cal-nav { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+  .cal-nav span { min-width: 8.5em; text-align: center; }
+  .cal-nav button {
+    width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--raised); cursor: pointer; line-height: 1;
+  }
+  .cal-nav button:disabled { opacity: .35; cursor: default; }
+  .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  .cal .wd { font-size: .75rem; color: var(--muted); text-align: center; }
+  .day {
+    aspect-ratio: 1; position: relative; padding: 0; overflow: hidden; cursor: pointer;
+    border-radius: 6px; border: 1px solid transparent; background: var(--raised) center / cover no-repeat;
+    font: inherit; font-size: .8rem; color: var(--muted);
+  }
+  .day span { position: absolute; left: 5px; top: 3px; }
+  .day.has span { color: #fff; text-shadow: 0 1px 3px rgb(0 0 0 / .8); }
+  .day:not(.has):not(:disabled):hover { border-color: var(--line); color: var(--text); }
+  .day.today { border-color: var(--silver); color: var(--text); }
+  .day:disabled { opacity: .35; cursor: default; }
+  .day.pad { visibility: hidden; }
+  .cal-foot { margin-top: 12px; }
+  .cal-foot .submit { width: 100%; }
+
+  dialog {
+    width: min(560px, calc(100% - 32px)); max-height: calc(100% - 32px); padding: 16px;
+    background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 12px;
+  }
+  dialog::backdrop { background: rgb(0 0 0 / .65); }
+  #viewer h3 { margin: 0 0 12px; font-size: 1.25rem; }
+  #viewer img { display: block; width: 100%; max-height: 65vh; object-fit: contain; border-radius: 8px; background: var(--bg); }
+  #viewer .meta { margin: 8px 0 0; font-size: .875rem; color: var(--muted); }
+  #viewer .actions { margin-top: 12px; }
+  #viewer .actions .close { margin-left: auto; }
+  #viewer-delete:hover { color: var(--danger); }
+
   body:not([data-auth="in"]) #app, body[data-auth="in"] #gate { display: none; }
   body:not([data-auth="in"]) #status { visibility: hidden; }
   #gate { margin-top: 40px; max-width: 34em; }
@@ -199,6 +237,20 @@
     <ul class="rows log" id="mine-list"></ul>
   </section>
 
+  <section id="daily">
+    <div class="cal-head">
+      <h2 class="narrow">Daily Bild</h2>
+      <div class="cal-nav">
+        <button id="cal-prev" type="button" aria-label="Vorheriger Monat">‹</button>
+        <span id="cal-month"></span>
+        <button id="cal-next" type="button" aria-label="Nächster Monat">›</button>
+      </div>
+    </div>
+    <div class="cal" id="cal"></div>
+    <div class="cal-foot" id="cal-foot"></div>
+    <input type="file" id="dailyFile" accept="image/*" hidden>
+  </section>
+
   <section>
     <h2 class="narrow">Marken</h2>
     <ul class="rows" id="brands"></ul>
@@ -223,6 +275,16 @@
   <p class="account"><span id="who"></span> <button class="link" id="signout" type="button">Abmelden</button></p>
   </div>
 </main>
+<dialog id="viewer">
+  <h3 class="narrow" id="viewer-date"></h3>
+  <img id="viewer-img" alt="">
+  <p class="meta" id="viewer-meta"></p>
+  <div class="actions">
+    <button class="link" id="viewer-replace" type="button">Ersetzen</button>
+    <button class="link" id="viewer-delete" type="button">Löschen</button>
+    <button class="link close" id="viewer-close" type="button">Schließen</button>
+  </div>
+</dialog>
 <div class="toast" id="toast" role="status"></div>
 
 <script type="module">
@@ -312,6 +374,10 @@
   const LEGACY_KEY = "energy-counter-v1"; // entries saved locally before the sync existed
   const LOG_SHORT = 12;
   const GOAL_CANS = 400; // = 100 € Pfand
+  // Daily Bild: photos are shrunk in the browser and stored as JPEG data URLs in the database
+  const DAILY_FULL = 1280; // px, long edge of the stored picture
+  const DAILY_THUMB = 240; // px, square calendar thumbnail
+  const DAILY_MAX = 1400000; // chars, stays under the limit in database.rules.json
 
   // Public web config; who may read/write is decided by database.rules.json
   const auth = getAuth(initializeApp({
@@ -333,12 +399,23 @@
   const canImage = (e) => BRANDS[e.brand].flavors[e.flavor] ?? BRANDS[e.brand].can;
   const label = (e) => e.brand === "other" ? e.flavor : `${BRANDS[e.brand].name} ${e.flavor}`;
   const timeFmt = new Intl.DateTimeFormat("de-AT", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
+  const monthFmt = new Intl.DateTimeFormat("de-AT", { month: "long", year: "numeric" });
+  const dayFmt = new Intl.DateTimeFormat("de-AT", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const shortDayFmt = new Intl.DateTimeFormat("de-AT", { day: "numeric", month: "long" });
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const dayKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const parseDay = (key) => { const [y, m, d] = key.split("-").map(Number); return new Date(y, m - 1, d); };
 
   // Firebase Realtime Database, spoken to over its REST API; `store` mirrors /entries as {id: entry},
-  // `pending` mirrors /pending as {uid: {id: submission}}, `mine` a submitter's own /pending/<uid>.
+  // `pending` mirrors /pending as {uid: {id: submission}}, `mine` a submitter's own /pending/<uid>,
+  // `daily` mirrors /daily as {"YYYY-MM-DD": {ts, by, thumb}}; full pictures in /dailyImg load on demand.
   let store = {};
   let pending = {};
   let mine = {};
+  let daily = {};
+  let calMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  let pickDay = null; // day the file picker is choosing a picture for
+  let viewing = null; // day shown in the viewer dialog
   let role = null;
   let entries = [];
   let loaded = false;
@@ -382,6 +459,8 @@
       rebuild();
     });
     if (role === "admin") watch("/pending", id, (data) => { pending = data; renderReview(); });
+    // a refused /daily only hides the calendar, it doesn't lock anyone out of the counter
+    watch("/daily", id, (data) => { daily = data; renderDaily(); }, () => { $("daily").hidden = true; });
   }
 
   function closeStreams() {
@@ -390,7 +469,7 @@
   }
 
   // Mirrors one database path live and calls onData with its whole value after every change
-  async function watch(path, id, onData) {
+  async function watch(path, id, onData, onDenied = deny) {
     const url = await authed(`${path}.json`);
     if (id !== session) return;
     const es = new EventSource(url);
@@ -418,15 +497,19 @@
     es.addEventListener("open", () => setStatus("live", "live"));
     es.addEventListener("error", async () => {
       if (id !== session) return;
-      setStatus("offline", "off");
       // the browser retries network drops by itself; a refused stream stays closed
-      if (es.readyState !== EventSource.CLOSED) return;
+      if (es.readyState !== EventSource.CLOSED) return setStatus("offline", "off");
       const res = await fetch(await authed(`${path}.json`) + "&shallow=true").catch(() => null);
       if (id !== session) return;
-      if (res?.status === 401) deny();
-      else setTimeout(() => id === session && startSession(), 5000);
+      if (res?.status === 401) return onDenied();
+      setStatus("offline", "off");
+      setTimeout(() => id === session && startSession(), 5000);
     });
-    es.addEventListener("cancel", () => id === session && deny());
+    es.addEventListener("cancel", () => {
+      if (id !== session) return;
+      es.close();
+      onDenied();
+    });
     // ID tokens last an hour; the database ends the stream when one expires
     es.addEventListener("auth_revoked", () => {
       if (id === session) auth.currentUser?.getIdToken(true).then(startSession);
@@ -602,6 +685,104 @@
       : `<li class="zero"><span>Noch nichts eingetragen.</span></li>`;
   }
 
+  const canPost = () => role === "admin" || role === "member";
+  const isJpeg = (s) => typeof s === "string" && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(s);
+
+  function renderDaily() {
+    const now = new Date(), today = dayKey(now);
+    const y = calMonth.getFullYear(), m = calMonth.getMonth();
+    const days = new Date(y, m + 1, 0).getDate();
+    const lead = (new Date(y, m, 1).getDay() + 6) % 7; // weeks start on Monday
+    $("cal-month").textContent = monthFmt.format(calMonth);
+    $("cal-next").disabled = y > now.getFullYear() || (y === now.getFullYear() && m >= now.getMonth());
+    const cells = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((d) => `<span class="wd">${d}</span>`);
+    for (let i = 0; i < lead; i++) cells.push(`<span class="day pad"></span>`);
+    for (let d = 1; d <= days; d++) {
+      const key = dayKey(new Date(y, m, d)), pic = isJpeg(daily[key]?.thumb) ? daily[key] : null;
+      const cls = ["day", pic && "has", key === today && "today"].filter(Boolean).join(" ");
+      const off = key > today || (!pic && !canPost());
+      const name = `${shortDayFmt.format(new Date(y, m, d))}, ${pic ? "Bild ansehen" : "Bild hochladen"}`;
+      cells.push(`<button class="${cls}" type="button" data-day="${key}" aria-label="${name}"${off ? " disabled" : ""}
+        ${pic ? `style="background-image: url('${pic.thumb}')"` : ""}><span>${d}</span></button>`);
+    }
+    $("cal").innerHTML = cells.join("");
+    $("cal-foot").innerHTML = canPost() && !daily[today]
+      ? `<button class="submit" type="button" data-day="${today}">Bild für heute hochladen</button>`
+      : "";
+  }
+
+  function chooseDaily(day) {
+    pickDay = day;
+    $("dailyFile").click();
+  }
+
+  // Draws img into a JPEG data URL: the whole picture fitted into size, or a centered square crop
+  function toJpeg(img, size, square, quality) {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const side = Math.min(w, h);
+    const [sx, sy, sw, sh] = square ? [(w - side) / 2, (h - side) / 2, side, side] : [0, 0, w, h];
+    const k = Math.min(1, size / Math.max(sw, sh));
+    const c = document.createElement("canvas");
+    c.width = Math.round(sw * k);
+    c.height = Math.round(sh * k);
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#1d2128"; // backdrop for transparent PNGs
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", quality);
+  }
+
+  async function uploadDaily(day, file) {
+    const url = URL.createObjectURL(file);
+    let full, thumb;
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      for (const q of [0.82, 0.7, 0.55, 0.4]) {
+        full = toJpeg(img, DAILY_FULL, false, q);
+        if (full.length < DAILY_MAX) break;
+      }
+      thumb = toJpeg(img, DAILY_THUMB, true, 0.7);
+    } catch {
+      return toast("Das Bild konnte nicht gelesen werden. Probier ein JPG oder PNG.");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+    const backup = daily[day];
+    const pic = { ts: Date.now(), by: auth.currentUser.email, thumb };
+    daily[day] = pic;
+    renderDaily();
+    toast("Bild wird hochgeladen…");
+    try {
+      await write(`/dailyImg/${day}`, "PUT", full);
+      await write(`/daily/${day}`, "PUT", pic);
+      toast(`Daily Bild für ${shortDayFmt.format(parseDay(day))} gespeichert`);
+    } catch {
+      if (backup) daily[day] = backup;
+      else delete daily[day];
+      renderDaily();
+      toast("Nicht hochgeladen, keine Verbindung zur Datenbank. Versuch es nochmal.");
+    }
+  }
+
+  async function openViewer(day) {
+    const pic = daily[day];
+    if (!pic) return;
+    viewing = day;
+    $("viewer-date").textContent = dayFmt.format(parseDay(day));
+    $("viewer-img").src = pic.thumb;
+    $("viewer-img").alt = `Daily Bild vom ${shortDayFmt.format(parseDay(day))}`;
+    $("viewer-meta").textContent = `Hochgeladen von ${pic.by}, ${timeFmt.format(new Date(pic.ts))}`;
+    $("viewer-replace").hidden = $("viewer-delete").hidden = !canPost();
+    $("viewer").showModal();
+    try {
+      const res = await fetch(await authed(`/dailyImg/${day}.json`));
+      const full = res.ok ? await res.json() : null;
+      if (viewing === day && daily[day]?.ts === pic.ts && typeof full === "string") $("viewer-img").src = full;
+    } catch {}
+  }
+
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
@@ -689,6 +870,45 @@
 
   $("more").addEventListener("click", () => { showAll = !showAll; render(); });
 
+  $("daily").addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-day]");
+    if (!btn || btn.disabled) return;
+    if (daily[btn.dataset.day]) openViewer(btn.dataset.day);
+    else if (canPost()) chooseDaily(btn.dataset.day);
+  });
+  $("cal-prev").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() - 1); renderDaily(); });
+  $("cal-next").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() + 1); renderDaily(); });
+  $("dailyFile").addEventListener("change", (ev) => {
+    const file = ev.target.files[0];
+    ev.target.value = "";
+    if (file && pickDay) uploadDaily(pickDay, file);
+  });
+  $("viewer").addEventListener("close", () => { viewing = null; $("viewer-img").removeAttribute("src"); });
+  $("viewer").addEventListener("click", (ev) => { if (ev.target === $("viewer")) $("viewer").close(); });
+  $("viewer-close").addEventListener("click", () => $("viewer").close());
+  $("viewer-replace").addEventListener("click", () => {
+    const day = viewing;
+    $("viewer").close();
+    chooseDaily(day);
+  });
+  $("viewer-delete").addEventListener("click", async () => {
+    const day = viewing;
+    if (!confirm(`Daily Bild vom ${shortDayFmt.format(parseDay(day))} löschen?`)) return;
+    $("viewer").close();
+    const backup = daily[day];
+    delete daily[day];
+    renderDaily();
+    try {
+      await write(`/daily/${day}`, "DELETE");
+      await write(`/dailyImg/${day}`, "DELETE");
+      toast("Bild gelöscht");
+    } catch {
+      daily[day] = backup;
+      renderDaily();
+      toast("Nicht gelöscht, keine Verbindung zur Datenbank. Versuch es nochmal.");
+    }
+  });
+
   $("export").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(entries, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
@@ -733,14 +953,18 @@
     store = {};
     pending = {};
     mine = {};
+    daily = {};
     loaded = false;
     role = !user ? null
       : NEEDS_APPROVAL.includes(user.email) ? "submitter"
       : user.email === ADMIN ? "admin" : "member";
     document.body.dataset.role = role ?? "";
+    $("daily").hidden = false;
+    if ($("viewer").open) $("viewer").close();
     rebuild();
     renderReview();
     renderMine();
+    renderDaily();
     if (!user) return setAuthState("out", "Nur für eingeladene Leute. Melde dich mit deinem Google-Konto an, um Dosen zu sehen und einzutragen.");
     $("who").textContent = `Angemeldet als ${user.email}.`;
     setAuthState("loading", "Lade…");
@@ -750,6 +974,7 @@
   setAuthState("loading", "Lade…");
   initForm();
   render();
+  renderDaily();
 </script>
 </body>
 </html>

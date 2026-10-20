@@ -58,6 +58,32 @@
           }
         }
       }
+    },
+    "daily": {
+      ".read": "(auth != null && auth.token.email_verified == true && (auth.token.email == 'x2clemens@gmail.com' || auth.token.email == 'bergosi1212@gmail.com' || auth.token.email == 'manuel.kemmer@kemedia.at' || auth.token.email == 'ragon.din@gmx.at')) || (auth != null && auth.token.email_verified == true && (auth.token.email == 'kemplsophie@gmail.com'))",
+      "$day": {
+        ".write": "auth != null && auth.token.email_verified == true && (auth.token.email == 'x2clemens@gmail.com' || auth.token.email == 'bergosi1212@gmail.com' || auth.token.email == 'manuel.kemmer@kemedia.at' || auth.token.email == 'ragon.din@gmx.at') && $day.matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)",
+        ".validate": "newData.hasChildren(['ts', 'by', 'thumb'])",
+        "ts": {
+          ".validate": "newData.isNumber()"
+        },
+        "by": {
+          ".validate": "newData.isString() && newData.val() === auth.token.email"
+        },
+        "thumb": {
+          ".validate": "newData.isString() && newData.val().beginsWith('data:image/jpeg;base64,') && newData.val().length < 60000"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "dailyImg": {
+      ".read": "(auth != null && auth.token.email_verified == true && (auth.token.email == 'x2clemens@gmail.com' || auth.token.email == 'bergosi1212@gmail.com' || auth.token.email == 'manuel.kemmer@kemedia.at' || auth.token.email == 'ragon.din@gmx.at')) || (auth != null && auth.token.email_verified == true && (auth.token.email == 'kemplsophie@gmail.com'))",
+      "$day": {
+        ".write": "auth != null && auth.token.email_verified == true && (auth.token.email == 'x2clemens@gmail.com' || auth.token.email == 'bergosi1212@gmail.com' || auth.token.email == 'manuel.kemmer@kemedia.at' || auth.token.email == 'ragon.din@gmx.at') && $day.matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)",
+        ".validate": "newData.isString() && newData.val().beginsWith('data:image/jpeg;base64,') && newData.val().length < 1500000"
+      }
     }
   }
 }
