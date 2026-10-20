@@ -68,7 +68,15 @@
   @keyframes drop { from { transform: translateY(-14px); opacity: 0; } }
   .shelf-empty { color: var(--muted); }
 
-  .totals { display: flex; flex-wrap: wrap; gap: 6px 28px; margin: 0 0 40px; }
+  .totals { display: flex; flex-wrap: wrap; gap: 6px 28px; margin: 0 0 24px; }
+
+  .goal { margin: 0 0 40px; }
+  .goal-head { display: flex; justify-content: space-between; gap: 12px; font-size: .875rem; color: var(--muted); }
+  .goal-head b { color: var(--text); font-weight: 600; }
+  .goal-track { height: 10px; margin: 8px 0 6px; border-radius: 5px; background: var(--raised); overflow: hidden; }
+  .goal-fill { height: 100%; border-radius: 5px; background: var(--silver); transition: width .6s ease; }
+  .goal.done .goal-fill { background: var(--live); }
+  .goal-left { font-size: .875rem; color: var(--muted); }
   .totals div { color: var(--muted); }
   .totals b { font-size: 1.75rem; color: var(--text); margin-right: 6px; }
 
@@ -146,7 +154,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .can.new, .can-img.new { animation: none; }
-    .toast { transition: none; }
+    .toast, .goal-fill { transition: none; }
   }
 </style>
 </head>
@@ -165,6 +173,7 @@
   <div id="app">
   <div class="shelf" id="shelf" aria-label="Alle getrunkenen Dosen"></div>
   <div class="totals" id="totals"></div>
+  <div class="goal" id="goal"></div>
 
   <form id="add">
     <label>Wer
@@ -302,6 +311,7 @@
   const DB_URL = "https://energy-counter-4ahitm-default-rtdb.europe-west1.firebasedatabase.app";
   const LEGACY_KEY = "energy-counter-v1"; // entries saved locally before the sync existed
   const LOG_SHORT = 12;
+  const GOAL_CANS = 400; // = 100 € Pfand
 
   // Public web config; who may read/write is decided by database.rules.json
   const auth = getAuth(initializeApp({
@@ -513,6 +523,19 @@
       <div><b class="narrow">${entries.length}</b>${entries.length === 1 ? "Dose" : "Dosen"}</div>
       <div><b class="narrow">${euro(cents)}</b>ausgegeben</div>
       <div><b class="narrow">${euro(entries.length * PFAND)}</b>Pfand</div>`;
+
+    const n = entries.length, pct = Math.min(100, (n / GOAL_CANS) * 100);
+    $("goal").classList.toggle("done", n >= GOAL_CANS);
+    $("goal").innerHTML = `
+      <div class="goal-head">
+        <span>Ziel: <b>${GOAL_CANS} Dosen</b>, also <b>${euro(GOAL_CANS * PFAND)}</b> Pfand</span>
+        <span>${Math.floor(pct)} %</span>
+      </div>
+      <div class="goal-track" role="progressbar" aria-label="Fortschritt zum Ziel"
+        aria-valuemin="0" aria-valuemax="${GOAL_CANS}" aria-valuenow="${Math.min(n, GOAL_CANS)}">
+        <div class="goal-fill" style="width: ${pct}%"></div>
+      </div>
+      <div class="goal-left">${n >= GOAL_CANS ? "Ziel erreicht!" : `Noch ${GOAL_CANS - n} ${GOAL_CANS - n === 1 ? "Dose" : "Dosen"} bis ${euro(GOAL_CANS * PFAND)} Pfand`}</div>`;
 
     $("brands").innerHTML = brandKeys.map((k) => `
       <li class="${byBrand[k] ? "" : "zero"}">
