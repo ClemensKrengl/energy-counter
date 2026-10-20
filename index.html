@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Energy Counter</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+<style>
+  :root {
+    --bg: #f4f4f1;
+    --card: #ffffff;
+    --text: #1b1b1f;
+    --muted: #6b6b75;
+    --border: #e2e2dc;
+    --accent: #e8a200;
+    --accent-text: #1b1b1f;
+    --danger: #c0392b;
+    --redbull: #1f3f8f;
+    --clever: #2e9e4f;
+    --sbudget: #d4142a;
+    --pfand: #8a6d1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121215;
+      --card: #1c1c21;
+      --text: #ececf0;
+      --muted: #9a9aa6;
+      --border: #2c2c33;
+      --accent: #f2b42a;
+      --redbull: #6f93f0;
+      --clever: #4fc472;
+      --sbudget: #ff5a6c;
+      --pfand: #d9b453;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121215;
+    --card: #1c1c21;
+    --text: #ececf0;
+    --muted: #9a9aa6;
+    --border: #2c2c33;
+    --accent: #f2b42a;
+    --redbull: #6f93f0;
+    --clever: #4fc472;
+    --sbudget: #ff5a6c;
+    --pfand: #d9b453;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.8rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 18px;
+  }
+  form { display: grid; gap: 12px; grid-template-columns: repeat(3, 1fr) auto; align-items: end; }
+  label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); }
+  select, button {
+    font: inherit;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    min-width: 0;
+  }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.ghost { background: transparent; }
+  button:active { transform: translateY(1px); }
+  .stats { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 18px; }
+  .stat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-top: 4px solid var(--c, var(--accent));
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .stat .name { font-size: .85rem; color: var(--muted); }
+  .stat .count { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .money { font-variant-numeric: tabular-nums; }
+  .stat .hint { font-size: .78rem; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+  th { font-size: .8rem; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; }
+  .scroll { overflow-x: auto; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .del { color: var(--danger); border: none; background: none; padding: 4px 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .empty { color: var(--muted); }
+  .toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px;
+    opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+  @media (max-width: 640px) {
+    form { grid-template-columns: 1fr; }
+    .hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>⚡ Energy Counter</h1>
+  <p class="sub">Red Bull, clever und S-Budget, mitgezählt pro Person. Alle Preise inkl. 0,25 € Pfand.</p>
+
+  <section class="card">
+    <h2>Dose eintragen</h2>
+    <form id="add">
+      <label>Wer?
+        <select id="person" required></select>
+      </label>
+      <label>Marke
+        <select id="brand" required></select>
+      </label>
+      <label>Geschmacksrichtung
+        <select id="flavor" required></select>
+      </label>
+      <button class="primary" type="submit">+ Hinzufügen</button>
+    </form>
+  </section>
+
+  <section class="stats" id="stats"></section>
+
+  <section class="card">
+    <h2>Pro Person</h2>
+    <div class="scroll"><table id="people"></table></div>
+  </section>
+
+  <section class="card">
+    <div class="row" style="justify-content: space-between; margin-bottom: 8px">
+      <h2 style="margin: 0">Verlauf</h2>
+      <div class="row">
+        <button class="ghost" id="export" type="button">Export</button>
+        <button class="ghost" id="import" type="button">Import</button>
+        <input type="file" id="importFile" accept="application/json" hidden>
+      </div>
+    </div>
+    <div class="scroll"><table id="history"></table></div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+  const PFAND = 25; // cents per can
+  const PEOPLE = ["Hut", "Karsten", "Sophie", "Kongi"];
+  const BRANDS = {
+    redbull: {
+      name: "Red Bull", price: 159, color: "--redbull",
+      flavors: [
+        "Original", "Sugarfree", "Zero",
+        "Red Edition (Wassermelone)",
+        "Blue Edition (Heidelbeere)",
+        "Yellow Edition (Tropical)",
+        "Green Edition (Kaktusfrucht)",
+        "White Edition (Kokos-Blaubeere)",
+        "Apricot Edition (Marille-Erdbeere)",
+        "Sea Blue Edition (Juneberry)",
+        "Peach Edition (Weißer Pfirsich)",
+        "Glacier Edition (Gletschereis-Himbeere)",
+        "Pink Edition Sugarfree (Waldbeere)",
+        "Cherry Edition Sugarfree (Kirsche)",
+        "Winter Edition (Pistazie-Beere)",
+        "Summer Edition",
+        "Andere",
+      ],
+    },
+    clever: {
+      name: "clever Energy", price: 49, color: "--clever",
+      flavors: [
+        "Original", "Sugarfree", "Kiwi", "Erdbeer-Limette",
+        "Honigmelone", "Marille-Holler", "Drachenfrucht", "Andere",
+      ],
+    },
+    sbudget: {
+      name: "S-Budget Energy", price: 59, color: "--sbudget",
+      flavors: [
+        "Original", "Sugarfree", "Sugarfree Limette", "Energy Cola",
+        "Heidelbeere", "Pfirsich", "Limette", "Cranberry", "Wassermelone",
+        "Marille-Erdbeere", "Kokos-Heidelbeere", "Juneberry",
+        "Tutti Frutti", "1001 Nacht", "Andere",
+      ],
+    },
+  };
+  const STORE_KEY = "energy-counter-v1";
+
+  const $ = (id) => document.getElementById(id);
+  const euro = (cents) => (cents / 100).toLocaleString("de-AT", { style: "currency", currency: "EUR" });
+  const unit = (brand) => BRANDS[brand].price + PFAND;
+
+  let entries = load();
+
+  function load() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; } catch { return []; }
+  }
+  function save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(entries)); } catch {}
+  }
+
+  function fillSelect(sel, options) {
+    sel.innerHTML = "";
+    for (const [value, label] of options) sel.add(new Option(label, value));
+  }
+
+  function remember(key, value) {
+    try { localStorage.setItem(key, value); } catch {}
+  }
+  function recall(key) {
+    try { return localStorage.getItem(key); } catch { return null; }
+  }
+
+  function initForm() {
+    fillSelect($("person"), PEOPLE.map((p) => [p, p]));
+    fillSelect($("brand"), Object.entries(BRANDS).map(([k, b]) => [k, `${b.name} (${euro(unit(k))})`]));
+    const lastPerson = recall("ec-person"), lastBrand = recall("ec-brand");
+    if (PEOPLE.includes(lastPerson)) $("person").value = lastPerson;
+    if (lastBrand in BRANDS) $("brand").value = lastBrand;
+    updateFlavors();
+    $("brand").addEventListener("change", updateFlavors);
+  }
+
+  function updateFlavors() {
+    fillSelect($("flavor"), BRANDS[$("brand").value].flavors.map((f) => [f, f]));
+  }
+
+  function render() {
+    const total = { n: 0, cents: 0 };
+    const byBrand = Object.fromEntries(Object.keys(BRANDS).map((k) => [k, 0]));
+    const byPerson = Object.fromEntries(PEOPLE.map((p) => [p, { n: 0, cents: 0, brands: { ...byBrand } }]));
+
+    for (const e of entries) {
+      total.n++;
+      total.cents += e.cents;
+      byBrand[e.brand]++;
+      const p = byPerson[e.person] ??= { n: 0, cents: 0, brands: Object.fromEntries(Object.keys(BRANDS).map((k) => [k, 0])) };
+      p.n++;
+      p.cents += e.cents;
+      p.brands[e.brand]++;
+    }
+
+    const stat = (name, count, money, hint, color) => `
+      <div class="stat" style="--c: var(${color})">
+        <div class="name">${name}</div>
+        <div class="count">${count}</div>
+        <div class="money">${money}</div>
+        <div class="hint">${hint}</div>
+      </div>`;
+
+    $("stats").innerHTML =
+      stat("Gesamt", total.n, euro(total.cents), "alle Dosen inkl. Pfand", "--accent") +
+      Object.entries(BRANDS).map(([k, b]) =>
+        stat(b.name, byBrand[k], euro(byBrand[k] * unit(k)), `${euro(b.price)} + ${euro(PFAND)} Pfand`, b.color)
+      ).join("") +
+      stat("Pfand", euro(total.n * PFAND), `${total.n} Dosen × ${euro(PFAND)}`, "zurückholbar beim Automaten", "--pfand");
+
+    const brandKeys = Object.keys(BRANDS);
+    $("people").innerHTML = `
+      <tr><th>Person</th>${brandKeys.map((k) => `<th class="num hide-sm">${BRANDS[k].name}</th>`).join("")}
+      <th class="num">Dosen</th><th class="num">Ausgaben</th></tr>
+      ${Object.entries(byPerson).map(([name, p]) => `
+        <tr><td>${esc(name)}</td>${brandKeys.map((k) => `<td class="num hide-sm">${p.brands[k]}</td>`).join("")}
+        <td class="num"><b>${p.n}</b></td><td class="num">${euro(p.cents)}</td></tr>`).join("")}`;
+
+    if (!entries.length) {
+      $("history").innerHTML = `<tr><td class="empty">Noch keine Dosen eingetragen.</td></tr>`;
+      return;
+    }
+    const fmt = new Intl.DateTimeFormat("de-AT", { dateStyle: "short", timeStyle: "short" });
+    $("history").innerHTML = `
+      <tr><th>Wann</th><th>Wer</th><th>Was</th><th class="num">Preis</th><th></th></tr>
+      ${[...entries].reverse().map((e) => `
+        <tr>
+          <td>${fmt.format(new Date(e.ts))}</td>
+          <td>${esc(e.person)}</td>
+          <td><span class="dot" style="background: var(${BRANDS[e.brand]?.color ?? "--muted"})"></span>${esc(BRANDS[e.brand]?.name ?? e.brand)} · ${esc(e.flavor)}</td>
+          <td class="num">${euro(e.cents)}</td>
+          <td class="num"><button class="del" data-id="${e.id}" title="Löschen">✕</button></td>
+        </tr>`).join("")}`;
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  }
+
+  function toast(msg) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => t.classList.remove("show"), 1800);
+  }
+
+  $("add").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const brand = $("brand").value, person = $("person").value, flavor = $("flavor").value;
+    entries.push({ id: crypto.randomUUID?.() ?? String(Date.now() + Math.random()), ts: Date.now(), person, brand, flavor, cents: unit(brand) });
+    remember("ec-person", person);
+    remember("ec-brand", brand);
+    save();
+    render();
+    toast(`${person}: ${BRANDS[brand].name} ${flavor} eingetragen`);
+  });
+
+  $("history").addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".del");
+    if (!btn) return;
+    const e = entries.find((x) => x.id === btn.dataset.id);
+    if (!e || !confirm(`${e.person}: ${BRANDS[e.brand]?.name} ${e.flavor} löschen?`)) return;
+    entries = entries.filter((x) => x !== e);
+    save();
+    render();
+  });
+
+  $("export").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(entries, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `energy-counter-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  $("import").addEventListener("click", () => $("importFile").click());
+  $("importFile").addEventListener("change", async (ev) => {
+    const file = ev.target.files[0];
+    ev.target.value = "";
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!Array.isArray(data)) throw new Error();
+      const known = new Set(entries.map((e) => e.id));
+      const fresh = data.filter((e) => e && e.id && e.brand in BRANDS && !known.has(e.id));
+      entries = [...entries, ...fresh].sort((a, b) => a.ts - b.ts);
+      save();
+      render();
+      toast(`${fresh.length} Einträge importiert`);
+    } catch {
+      toast("Datei konnte nicht gelesen werden");
+    }
+  });
+
+  initForm();
+  render();
+</script>
+</body>
+</html>
