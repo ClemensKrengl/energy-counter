@@ -49,11 +49,12 @@
 
   /* The shelf: one can per entry, grouped by brand */
   .shelf {
-    display: flex; flex-wrap: wrap; gap: 4px 3px;
-    margin: 28px 0 20px; min-height: 26px;
+    display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 2px;
+    margin: 28px 0 20px; min-height: 48px;
   }
+  .can-img { height: 48px; width: auto; display: block; }
   .can {
-    width: 14px; height: 24px; position: relative;
+    width: 20px; height: 46px; position: relative;
     border-radius: 3px 3px 4px 4px;
     background:
       linear-gradient(90deg, rgb(0 0 0 / .18), rgb(255 255 255 / .22) 30%, transparent 55%, rgb(0 0 0 / .22)),
@@ -63,7 +64,7 @@
     content: ""; position: absolute; left: 1px; right: 1px; top: -2px; height: 4px;
     border-radius: 2px; background: #b9bec7;
   }
-  .can.new { animation: drop .45s cubic-bezier(.3, 1.4, .5, 1); }
+  .can.new, .can-img.new { animation: drop .45s cubic-bezier(.3, 1.4, .5, 1); }
   @keyframes drop { from { transform: translateY(-14px); opacity: 0; } }
   .shelf-empty { color: var(--muted); }
 
@@ -128,7 +129,7 @@
     form label:nth-child(3) { grid-column: 1 / -1; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .can.new { animation: none; }
+    .can.new, .can-img.new { animation: none; }
     .toast { transition: none; }
   }
 </style>
@@ -183,49 +184,80 @@
 <script>
   const PFAND = 25; // cents per can
   const PEOPLE = ["Hut", "Karsten", "Sophie", "Kongi", "Unbekannt", "Gast"];
+  // flavors: name -> can photo in cans/ (null = use the brand's classic can)
   const BRANDS = {
     redbull: {
-      name: "Red Bull", price: 159, color: "--redbull",
-      flavors: [
-        "Classic", "Sugarfree", "Zero",
-        "Red Edition (Wassermelone)",
-        "Blue Edition (Heidelbeere)",
-        "Yellow Edition (Tropical)",
-        "Green Edition (Kaktusfrucht)",
-        "White Edition (Kokos-Blaubeere)",
-        "Apricot Edition (Marille-Erdbeere)",
-        "Sea Blue Edition (Juneberry)",
-        "Peach Edition (White Peach)",
-        "Glacier Edition (Gletschereis-Himbeere)",
-        "Pink Edition Sugarfree (Waldbeere)",
-        "Cherry Edition Sugarfree (Kirsche-Sakura)",
-        "Winter Edition (Pistazie)",
-        "Winter Edition Sugarfree (Pistazie)",
-        "Sugarfree Sudachi",
-        "Summer Edition",
-        "Andere",
-      ],
+      name: "Red Bull", price: 159, color: "--redbull", can: "rb-classic",
+      flavors: {
+        "Classic": "rb-classic",
+        "Sugarfree": "rb-sugarfree",
+        "Zero": "rb-zero",
+        "Red Edition (Wassermelone)": null,
+        "Blue Edition (Heidelbeere)": null,
+        "Yellow Edition (Tropical)": null,
+        "Green Edition (Kaktusfrucht)": "rb-green",
+        "White Edition (Kokos-Blaubeere)": "rb-white",
+        "Apricot Edition (Marille-Erdbeere)": "rb-apricot",
+        "Sea Blue Edition (Juneberry)": "rb-seablue",
+        "Peach Edition (White Peach)": "rb-peach",
+        "Ice Edition (Iced Gummy Bear)": "rb-ice",
+        "Lilac Edition Sugarfree": "rb-lilac",
+        "Glacier Edition (Gletschereis-Himbeere)": null,
+        "Pink Edition Sugarfree (Waldbeere)": "rb-pink",
+        "Cherry Edition Sugarfree (Kirsche-Sakura)": "rb-cherry",
+        "Winter Edition (Pistazie)": "rb-pistachio",
+        "Winter Edition Sugarfree (Pistazie)": "rb-pistachio-sf",
+        "Winter Edition 2025 (Fuji-Apfel & Ingwer)": "rb-fuji",
+        "Sugarfree Sudachi": "rb-sudachi",
+        "Summer Edition": "rb-sudachi",
+        "Andere": null,
+      },
     },
     clever: {
-      name: "clever Energy", price: 49, color: "--clever",
-      flavors: [
-        "Classic", "Sugarfree", "Zero", "Kiwi", "Erdbeer-Limette",
-        "Honigmelone", "Ananas", "Heidelbeere", "White Peach", "Juneberry",
-        "Marille-Holler", "Drachenfrucht", "Andere",
-      ],
+      name: "clever Energy", price: 49, color: "--clever", can: "cl-classic",
+      flavors: {
+        "Classic": "cl-classic",
+        "Sugarfree": "cl-zero",
+        "Zero": "cl-zero",
+        "Kiwi": "cl-kiwi",
+        "Erdbeer-Limette": "cl-erdbeer-limette",
+        "Honigmelone": "cl-honigmelone",
+        "Ananas": "cl-ananas",
+        "Heidelbeere": "cl-heidelbeere",
+        "White Peach": "cl-peach",
+        "Juneberry": null,
+        "Marille-Holler": null,
+        "Drachenfrucht": null,
+        "Andere": null,
+      },
     },
     sbudget: {
-      name: "S-Budget Energy", price: 59, color: "--sbudget",
-      flavors: [
-        "Classic", "Sugarfree", "Sugarfree Limette", "Energy Cola",
-        "Heidelbeere", "Kirsche", "Kirsche-Banane", "Pfirsich", "Limette", "Cranberry", "Wassermelone",
-        "Marille-Erdbeere", "Kokos-Heidelbeere", "Juneberry",
-        "Tutti Frutti", "1001 Nacht", "Andere",
-      ],
+      name: "S-Budget Energy", price: 59, color: "--sbudget", can: "sb-classic",
+      flavors: {
+        "Classic": "sb-classic",
+        "Sugarfree": "sb-sugarfree",
+        "Sugarfree Limette": "sb-sf-limette",
+        "Sugarfree Heidelbeere": "sb-sf-heidelbeere",
+        "Energy Cola": "sb-cola",
+        "Heidelbeere": "sb-heidelbeere",
+        "Kirsche": null,
+        "Kirsche-Banane": "sb-kirsche-banane",
+        "Pfirsich": null,
+        "Limette": "sb-limette",
+        "Cranberry": null,
+        "Wassermelone": "sb-wassermelone",
+        "Marille-Erdbeere": "sb-marille-erdbeere",
+        "Kokos-Heidelbeere": "sb-kokos-heidelbeere",
+        "Juneberry": "sb-juneberry",
+        "Sour Ananas": "sb-sour-ananas",
+        "Tutti Frutti": "sb-tutti-frutti",
+        "1001 Nacht": "sb-1001",
+        "Andere": null,
+      },
     },
     other: {
-      name: "Unbekannt/Gast", price: 0, color: "--other",
-      flavors: ["Unbekannt", "Gastdose"],
+      name: "Unbekannt/Gast", price: 0, color: "--other", can: null,
+      flavors: { "Unbekannt": null, "Gastdose": null },
     },
   };
   const DB_URL = "https://energy-counter-4ahitm-default-rtdb.europe-west1.firebasedatabase.app";
@@ -235,6 +267,7 @@
   const $ = (id) => document.getElementById(id);
   const euro = (cents) => (cents / 100).toLocaleString("de-AT", { style: "currency", currency: "EUR" });
   const unit = (brand) => BRANDS[brand].price + PFAND;
+  const canImage = (e) => BRANDS[e.brand].flavors[e.flavor] ?? BRANDS[e.brand].can;
   const label = (e) => e.brand === "other" ? e.flavor : `${BRANDS[e.brand].name} ${e.flavor}`;
 
   // Firebase Realtime Database, spoken to over its REST API; `store` mirrors /entries as {id: entry}.
@@ -334,7 +367,7 @@
   }
 
   function updateFlavors() {
-    fillSelect($("flavor"), BRANDS[$("brand").value].flavors.map((f) => [f, f]));
+    fillSelect($("flavor"), Object.keys(BRANDS[$("brand").value].flavors).map((f) => [f, f]));
   }
 
   function render() {
@@ -350,10 +383,19 @@
       p.cents += e.cents;
     }
 
-    const shelf = brandKeys.flatMap((k) => entries.filter((e) => e.brand === k));
+    // grouped by brand, identical cans side by side
+    const flavorRank = (e) => Object.keys(BRANDS[e.brand].flavors).indexOf(e.flavor);
+    const shelf = brandKeys.flatMap((k) => entries.filter((e) => e.brand === k)
+      .sort((a, b) => flavorRank(a) - flavorRank(b) || a.ts - b.ts));
     $("shelf").innerHTML = shelf.length
-      ? shelf.map((e) => `<span class="can${e.id === justAdded ? " new" : ""}" style="--c: var(${BRANDS[e.brand].color})"
-          title="${esc(`${label(e)}, ${e.person}`)}"></span>`).join("")
+      ? shelf.map((e) => {
+          const cls = e.id === justAdded ? " new" : "";
+          const title = esc(`${label(e)}, ${e.person}`);
+          const img = canImage(e);
+          return img
+            ? `<img class="can-img${cls}" src="cans/${img}.webp" alt="${title}" title="${title}">`
+            : `<span class="can${cls}" style="--c: var(${BRANDS[e.brand].color})" title="${title}"></span>`;
+        }).join("")
       : `<span class="shelf-empty">Noch keine Dosen. Trag unten die erste ein.</span>`;
     justAdded = null;
 
