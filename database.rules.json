@@ -3,7 +3,7 @@
     "entries": {
       ".read": true,
       "$id": {
-        ".write": "$id.length < 40",
+        ".write": false,
         ".validate": "newData.hasChildren(['ts', 'person', 'brand', 'flavor', 'cents'])",
         "ts": { ".validate": "newData.isNumber()" },
         "person": { ".validate": "newData.isString() && newData.val().length < 30" },
