@@ -1,9 +1,9 @@
 {
   "rules": {
     "entries": {
-      ".read": "auth != null && auth.token.email_verified == true && (auth.token.email == 'x2clemens@gmail.com' || auth.token.email == 'bergosi1212@gmail.com')",
+      ".read": "auth != null && auth.token.email_verified == true && (auth.token.email == 'x2clemens@gmail.com' || auth.token.email == 'bergosi1212@gmail.com' || auth.token.email == 'kemplsophie@gmail.com' || auth.token.email == 'manuel.kemmer@kemedia.at')",
       "$id": {
-        ".write": "auth != null && auth.token.email_verified == true && (auth.token.email == 'x2clemens@gmail.com' || auth.token.email == 'bergosi1212@gmail.com') && $id.length < 40",
+        ".write": "auth != null && auth.token.email_verified == true && (auth.token.email == 'x2clemens@gmail.com' || auth.token.email == 'bergosi1212@gmail.com' || auth.token.email == 'kemplsophie@gmail.com' || auth.token.email == 'manuel.kemmer@kemedia.at') && $id.length < 40",
         ".validate": "newData.hasChildren(['ts', 'person', 'brand', 'flavor', 'cents'])",
         "ts": { ".validate": "newData.isNumber()" },
         "person": { ".validate": "newData.isString() && newData.val().length < 30" },
