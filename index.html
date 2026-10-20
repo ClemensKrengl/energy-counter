@@ -114,6 +114,13 @@
   .more { margin-top: 12px; }
 
   footer { display: flex; gap: 20px; font-size: .875rem; }
+  .account { margin: 12px 0 0; font-size: .875rem; color: var(--muted); }
+
+  body:not([data-auth="in"]) #app, body[data-auth="in"] #gate { display: none; }
+  body:not([data-auth="in"]) #status { visibility: hidden; }
+  #gate { margin-top: 40px; max-width: 34em; }
+  #gate p { margin: 0 0 20px; color: var(--muted); font-size: 1.1rem; }
+  #gate .submit { width: 100%; max-width: 320px; }
 
   .toast {
     position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 12px);
@@ -138,9 +145,15 @@
 <main>
   <header>
     <h1 class="narrow">Energy Counter</h1>
-    <span id="status">verbinde</span>
+    <span id="status"></span>
   </header>
 
+  <section id="gate">
+    <p id="gate-text">Lade…</p>
+    <button class="submit" id="signin" type="button" hidden>Mit Google anmelden</button>
+  </section>
+
+  <div id="app">
   <div class="shelf" id="shelf" aria-label="Alle getrunkenen Dosen"></div>
   <div class="totals" id="totals"></div>
 
@@ -178,10 +191,16 @@
     <button class="link" id="import" type="button">Daten importieren</button>
     <input type="file" id="importFile" accept="application/json" hidden>
   </footer>
+  <p class="account"><span id="who"></span> <button class="link" id="signout" type="button">Abmelden</button></p>
+  </div>
 </main>
 <div class="toast" id="toast" role="status"></div>
 
-<script>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+  import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut }
+    from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
+
   const PFAND = 25; // cents per can
   const PEOPLE = ["Hut", "Karsten", "Sophie", "Kongi", "Unbekannt", "Gast"];
   // flavors: name -> can photo in cans/ (null = use the brand's classic can)
@@ -264,6 +283,15 @@
   const LEGACY_KEY = "energy-counter-v1"; // entries saved locally before the sync existed
   const LOG_SHORT = 12;
 
+  // Public web config; who may read/write is decided by database.rules.json
+  const auth = getAuth(initializeApp({
+    apiKey: "AIzaSyDcZL-bcPbEJ7dyjbiC-AQJlociVhZNIGs",
+    authDomain: "energy-counter-4ahitm.firebaseapp.com",
+    databaseURL: DB_URL,
+    projectId: "energy-counter-4ahitm",
+    appId: "1:526770112304:web:9a841f66b92da4149a6af5",
+  }));
+
   const $ = (id) => document.getElementById(id);
   const euro = (cents) => (cents / 100).toLocaleString("de-AT", { style: "currency", currency: "EUR" });
   const unit = (brand) => BRANDS[brand].price + PFAND;
@@ -276,6 +304,7 @@
   let loaded = false;
   let showAll = false;
   let justAdded = null;
+  let stream = null;
 
   function rebuild() {
     entries = Object.entries(store)
@@ -290,14 +319,25 @@
     $("status").className = cls;
   }
 
-  function connect() {
-    const es = new EventSource(`${DB_URL}/entries.json`);
+  function setAuthState(state, text = "") {
+    document.body.dataset.auth = state;
+    $("gate-text").textContent = text;
+    $("signin").hidden = state === "loading";
+    $("signin").textContent = state === "denied" ? "Mit anderem Konto anmelden" : "Mit Google anmelden";
+  }
+
+  const authed = async (path) => `${DB_URL}${path}?auth=${await auth.currentUser.getIdToken()}`;
+
+  async function connect() {
+    stream?.close();
+    const es = stream = new EventSource(await authed("/entries.json"));
     es.addEventListener("put", (ev) => {
       const { path, data } = JSON.parse(ev.data);
       if (path === "/") store = data || {};
       else applyChild(path.slice(1), data);
       if (!loaded) { loaded = true; migrateLegacy(); }
       setStatus("live", "live");
+      setAuthState("in");
       rebuild();
     });
     es.addEventListener("patch", (ev) => {
@@ -306,7 +346,23 @@
       rebuild();
     });
     es.addEventListener("open", () => setStatus("live", "live"));
-    es.addEventListener("error", () => setStatus("offline", "off"));
+    es.addEventListener("error", async () => {
+      setStatus("offline", "off");
+      // the browser retries network drops by itself; a refused stream stays closed
+      if (es.readyState !== EventSource.CLOSED || es !== stream) return;
+      const res = await fetch(await authed("/entries.json") + "&shallow=true").catch(() => null);
+      if (res?.status === 401) deny();
+      else setTimeout(() => es === stream && connect(), 5000);
+    });
+    es.addEventListener("cancel", deny);
+    // ID tokens last an hour; the database ends the stream when one expires
+    es.addEventListener("auth_revoked", () => { auth.currentUser?.getIdToken(true).then(connect); });
+  }
+
+  function deny() {
+    stream?.close();
+    stream = null;
+    setAuthState("denied", `${auth.currentUser?.email ?? "Dieses Konto"} ist für den Energy Counter nicht freigeschaltet.`);
   }
 
   function applyChild(path, data) {
@@ -321,7 +377,7 @@
   }
 
   async function remote(id, method, entry) {
-    const res = await fetch(`${DB_URL}/entries/${encodeURIComponent(id)}.json`, {
+    const res = await fetch(await authed(`/entries/${encodeURIComponent(id)}.json`), {
       method,
       body: entry ? JSON.stringify(entry) : undefined,
     });
@@ -516,9 +572,34 @@
     }
   });
 
+  $("signin").addEventListener("click", async () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (err) {
+      if (err.code !== "auth/popup-closed-by-user" && err.code !== "auth/cancelled-popup-request") {
+        toast("Anmeldung fehlgeschlagen. Erlaube Pop-ups für diese Seite und versuch es nochmal.");
+      }
+    }
+  });
+  $("signout").addEventListener("click", () => signOut(auth));
+
+  onAuthStateChanged(auth, (user) => {
+    stream?.close();
+    stream = null;
+    store = {};
+    loaded = false;
+    rebuild();
+    if (!user) return setAuthState("out", "Nur für eingeladene Leute. Melde dich mit deinem Google-Konto an, um Dosen zu sehen und einzutragen.");
+    $("who").textContent = `Angemeldet als ${user.email}.`;
+    setAuthState("loading", "Lade…");
+    connect();
+  });
+
+  setAuthState("loading", "Lade…");
   initForm();
   render();
-  connect();
 </script>
 </body>
 </html>
