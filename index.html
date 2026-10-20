@@ -115,7 +115,7 @@
 <body>
 <main>
   <h1>⚡ Energy Counter</h1>
-  <p class="sub">Red Bull, clever und S-Budget, mitgezählt pro Person. Alle Preise inkl. 0,25 € Pfand.</p>
+  <p class="sub">Red Bull, clever und S-Budget, mitgezählt pro Person. Alle Preise inkl. 0,25 € Pfand. <span id="status" style="color: var(--muted)">● Verbinde…</span></p>
 
   <section class="card">
     <h2>Dose eintragen</h2>
@@ -156,12 +156,12 @@
 
 <script>
   const PFAND = 25; // cents per can
-  const PEOPLE = ["Hut", "Karsten", "Sophie", "Kongi"];
+  const PEOPLE = ["Hut", "Karsten", "Sophie", "Kongi", "Unbekannt", "Gast"];
   const BRANDS = {
     redbull: {
       name: "Red Bull", price: 159, color: "--redbull",
       flavors: [
-        "Original", "Sugarfree", "Zero",
+        "Classic", "Sugarfree", "Zero",
         "Red Edition (Wassermelone)",
         "Blue Edition (Heidelbeere)",
         "Yellow Edition (Tropical)",
@@ -169,11 +169,13 @@
         "White Edition (Kokos-Blaubeere)",
         "Apricot Edition (Marille-Erdbeere)",
         "Sea Blue Edition (Juneberry)",
-        "Peach Edition (Weißer Pfirsich)",
+        "Peach Edition (White Peach)",
         "Glacier Edition (Gletschereis-Himbeere)",
         "Pink Edition Sugarfree (Waldbeere)",
-        "Cherry Edition Sugarfree (Kirsche)",
-        "Winter Edition (Pistazie-Beere)",
+        "Cherry Edition Sugarfree (Kirsche-Sakura)",
+        "Winter Edition (Pistazie)",
+        "Winter Edition Sugarfree (Pistazie)",
+        "Sugarfree Sudachi",
         "Summer Edition",
         "Andere",
       ],
@@ -181,33 +183,102 @@
     clever: {
       name: "clever Energy", price: 49, color: "--clever",
       flavors: [
-        "Original", "Sugarfree", "Kiwi", "Erdbeer-Limette",
-        "Honigmelone", "Marille-Holler", "Drachenfrucht", "Andere",
+        "Classic", "Sugarfree", "Zero", "Kiwi", "Erdbeer-Limette",
+        "Honigmelone", "Ananas", "Heidelbeere", "White Peach", "Juneberry",
+        "Marille-Holler", "Drachenfrucht", "Andere",
       ],
     },
     sbudget: {
       name: "S-Budget Energy", price: 59, color: "--sbudget",
       flavors: [
-        "Original", "Sugarfree", "Sugarfree Limette", "Energy Cola",
-        "Heidelbeere", "Pfirsich", "Limette", "Cranberry", "Wassermelone",
+        "Classic", "Sugarfree", "Sugarfree Limette", "Energy Cola",
+        "Heidelbeere", "Kirsche", "Kirsche-Banane", "Pfirsich", "Limette", "Cranberry", "Wassermelone",
         "Marille-Erdbeere", "Kokos-Heidelbeere", "Juneberry",
         "Tutti Frutti", "1001 Nacht", "Andere",
       ],
     },
+    other: {
+      name: "Unbekannt/Gast", price: 0, color: "--muted",
+      flavors: ["Unbekannt", "Gastdose"],
+    },
   };
-  const STORE_KEY = "energy-counter-v1";
+  const DB_URL = "https://energy-counter-4ahitm-default-rtdb.europe-west1.firebasedatabase.app";
+  const LEGACY_KEY = "energy-counter-v1"; // entries saved locally before the sync existed
 
   const $ = (id) => document.getElementById(id);
   const euro = (cents) => (cents / 100).toLocaleString("de-AT", { style: "currency", currency: "EUR" });
   const unit = (brand) => BRANDS[brand].price + PFAND;
 
-  let entries = load();
+  // Firebase Realtime Database, spoken to over its REST API; `store` mirrors /entries as {id: entry}.
+  let store = {};
+  let entries = [];
+  let loaded = false;
 
-  function load() {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; } catch { return []; }
+  function rebuild() {
+    entries = Object.entries(store)
+      .filter(([, e]) => e && e.brand in BRANDS)
+      .map(([id, e]) => ({ id, ...e }))
+      .sort((a, b) => a.ts - b.ts);
+    render();
   }
-  function save() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(entries)); } catch {}
+
+  function setStatus(text, ok) {
+    $("status").textContent = text;
+    $("status").style.color = ok ? "var(--clever)" : "var(--danger)";
+  }
+
+  function connect() {
+    const es = new EventSource(`${DB_URL}/entries.json`);
+    es.addEventListener("put", (ev) => {
+      const { path, data } = JSON.parse(ev.data);
+      if (path === "/") store = data || {};
+      else applyChild(path.slice(1), data);
+      if (!loaded) { loaded = true; migrateLegacy(); }
+      setStatus("● Live synchronisiert", true);
+      rebuild();
+    });
+    es.addEventListener("patch", (ev) => {
+      const { path, data } = JSON.parse(ev.data);
+      if (path === "/") for (const [id, e] of Object.entries(data)) applyChild(id, e);
+      rebuild();
+    });
+    es.addEventListener("open", () => setStatus("● Live synchronisiert", true));
+    es.addEventListener("error", () => setStatus("● Offline, verbinde neu…", false));
+  }
+
+  function applyChild(path, data) {
+    const [id, field] = path.split("/");
+    if (field) {
+      if (store[id]) store[id][field] = data;
+    } else if (data === null) {
+      delete store[id];
+    } else {
+      store[id] = data;
+    }
+  }
+
+  async function remote(id, method, entry) {
+    const res = await fetch(`${DB_URL}/entries/${encodeURIComponent(id)}.json`, {
+      method,
+      body: entry ? JSON.stringify(entry) : undefined,
+    });
+    if (!res.ok) throw new Error(res.status);
+  }
+
+  async function upload(list) {
+    await Promise.all(list.map(({ id, ts, person, brand, flavor, cents }) =>
+      remote(id, "PUT", { ts, person, brand, flavor, cents })));
+  }
+
+  async function migrateLegacy() {
+    let legacy;
+    try { legacy = JSON.parse(localStorage.getItem(LEGACY_KEY)) || []; } catch { return; }
+    const fresh = legacy.filter((e) => e && e.id && e.brand in BRANDS && !(e.id in store));
+    try {
+      await upload(fresh);
+      localStorage.removeItem(LEGACY_KEY);
+      if (fresh.length) toast(`${fresh.length} lokale Einträge hochgeladen`);
+    } catch {}
   }
 
   function fillSelect(sel, options) {
@@ -303,25 +374,43 @@
     toast.timer = setTimeout(() => t.classList.remove("show"), 1800);
   }
 
-  $("add").addEventListener("submit", (ev) => {
+  function newId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  $("add").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const brand = $("brand").value, person = $("person").value, flavor = $("flavor").value;
-    entries.push({ id: crypto.randomUUID?.() ?? String(Date.now() + Math.random()), ts: Date.now(), person, brand, flavor, cents: unit(brand) });
+    const id = newId(), entry = { ts: Date.now(), person, brand, flavor, cents: unit(brand) };
     remember("ec-person", person);
     remember("ec-brand", brand);
-    save();
-    render();
-    toast(`${person}: ${BRANDS[brand].name} ${flavor} eingetragen`);
+    store[id] = entry;
+    rebuild();
+    try {
+      await remote(id, "PUT", entry);
+      toast(`${person}: ${BRANDS[brand].name} ${flavor} eingetragen`);
+    } catch {
+      delete store[id];
+      rebuild();
+      toast("Speichern fehlgeschlagen, bitte nochmal versuchen");
+    }
   });
 
-  $("history").addEventListener("click", (ev) => {
+  $("history").addEventListener("click", async (ev) => {
     const btn = ev.target.closest(".del");
     if (!btn) return;
     const e = entries.find((x) => x.id === btn.dataset.id);
     if (!e || !confirm(`${e.person}: ${BRANDS[e.brand]?.name} ${e.flavor} löschen?`)) return;
-    entries = entries.filter((x) => x !== e);
-    save();
-    render();
+    const backup = store[e.id];
+    delete store[e.id];
+    rebuild();
+    try {
+      await remote(e.id, "DELETE");
+    } catch {
+      store[e.id] = backup;
+      rebuild();
+      toast("Löschen fehlgeschlagen");
+    }
   });
 
   $("export").addEventListener("click", () => {
@@ -341,11 +430,8 @@
     try {
       const data = JSON.parse(await file.text());
       if (!Array.isArray(data)) throw new Error();
-      const known = new Set(entries.map((e) => e.id));
-      const fresh = data.filter((e) => e && e.id && e.brand in BRANDS && !known.has(e.id));
-      entries = [...entries, ...fresh].sort((a, b) => a.ts - b.ts);
-      save();
-      render();
+      const fresh = data.filter((e) => e && e.id && e.brand in BRANDS && !(e.id in store));
+      await upload(fresh);
       toast(`${fresh.length} Einträge importiert`);
     } catch {
       toast("Datei konnte nicht gelesen werden");
@@ -354,6 +440,7 @@
 
   initForm();
   render();
+  connect();
 </script>
 </body>
 </html>

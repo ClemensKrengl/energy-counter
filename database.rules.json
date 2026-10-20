@@ -1,0 +1,17 @@
+{
+  "rules": {
+    "entries": {
+      ".read": true,
+      "$id": {
+        ".write": "$id.length < 40",
+        ".validate": "newData.hasChildren(['ts', 'person', 'brand', 'flavor', 'cents'])",
+        "ts": { ".validate": "newData.isNumber()" },
+        "person": { ".validate": "newData.isString() && newData.val().length < 30" },
+        "brand": { ".validate": "newData.val() === 'redbull' || newData.val() === 'clever' || newData.val() === 'sbudget' || newData.val() === 'other'" },
+        "flavor": { ".validate": "newData.isString() && newData.val().length < 60" },
+        "cents": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 1000" },
+        "$other": { ".validate": false }
+      }
+    }
+  }
+}
