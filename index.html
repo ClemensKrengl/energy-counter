@@ -114,6 +114,15 @@
   .more { margin-top: 12px; }
 
   footer { display: flex; gap: 20px; font-size: .875rem; }
+  body[data-role="submitter"] .counter, body:not([data-role="submitter"]) #mine { display: none; }
+  .note { margin: 0 0 8px; color: var(--muted); }
+  body[data-role="submitter"] form { margin-top: 32px; }
+  #review-list li { grid-template-columns: 1fr auto; }
+  .actions { grid-column: 1 / -1; display: flex; gap: 20px; }
+  .log .actions .link:first-child:hover { color: var(--live); }
+  .state { font-size: .875rem; color: var(--muted); text-align: right; }
+  .state.angenommen { color: var(--live); }
+  .state.abgelehnt { color: var(--danger); }
   .account { margin: 12px 0 0; font-size: .875rem; color: var(--muted); }
 
   body:not([data-auth="in"]) #app, body[data-auth="in"] #gate { display: none; }
@@ -154,8 +163,8 @@
   </section>
 
   <div id="app">
-  <div class="shelf" id="shelf" aria-label="Alle getrunkenen Dosen"></div>
-  <div class="totals" id="totals"></div>
+  <div class="shelf counter" id="shelf" aria-label="Alle getrunkenen Dosen"></div>
+  <div class="totals counter" id="totals"></div>
 
   <form id="add">
     <label>Wer
@@ -170,23 +179,34 @@
     <button class="submit" type="submit">Dose eintragen</button>
   </form>
 
-  <section>
+  <section id="review" hidden>
+    <h2 class="narrow">Zur Freigabe</h2>
+    <ul class="rows log" id="review-list"></ul>
+  </section>
+
+  <section id="mine">
+    <h2 class="narrow">Deine Einträge</h2>
+    <p class="note">Deine Dosen zählen, sobald sie freigegeben sind.</p>
+    <ul class="rows log" id="mine-list"></ul>
+  </section>
+
+  <section class="counter">
     <h2 class="narrow">Marken</h2>
     <ul class="rows" id="brands"></ul>
   </section>
 
-  <section>
+  <section class="counter">
     <h2 class="narrow">Leute</h2>
     <ul class="rows" id="people"></ul>
   </section>
 
-  <section>
+  <section class="counter">
     <h2 class="narrow">Zuletzt</h2>
     <ul class="rows log" id="history"></ul>
     <button class="link more" id="more" type="button" hidden></button>
   </section>
 
-  <footer>
+  <footer class="counter">
     <button class="link" id="export" type="button">Daten exportieren</button>
     <button class="link" id="import" type="button">Daten importieren</button>
     <input type="file" id="importFile" accept="application/json" hidden>
@@ -292,19 +312,30 @@
     appId: "1:526770112304:web:9a841f66b92da4149a6af5",
   }));
 
+  // Roles for the UI only; database.rules.json is what enforces them
+  const ADMIN = "x2clemens@gmail.com";
+  const NEEDS_APPROVAL = ["kemplsophie@gmail.com"];
+  const STATUS = { offen: "wartet auf Freigabe", angenommen: "angenommen", abgelehnt: "abgelehnt" };
+
   const $ = (id) => document.getElementById(id);
   const euro = (cents) => (cents / 100).toLocaleString("de-AT", { style: "currency", currency: "EUR" });
   const unit = (brand) => BRANDS[brand].price + PFAND;
   const canImage = (e) => BRANDS[e.brand].flavors[e.flavor] ?? BRANDS[e.brand].can;
   const label = (e) => e.brand === "other" ? e.flavor : `${BRANDS[e.brand].name} ${e.flavor}`;
+  const timeFmt = new Intl.DateTimeFormat("de-AT", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
 
-  // Firebase Realtime Database, spoken to over its REST API; `store` mirrors /entries as {id: entry}.
+  // Firebase Realtime Database, spoken to over its REST API; `store` mirrors /entries as {id: entry},
+  // `pending` mirrors /pending as {uid: {id: submission}}, `mine` a submitter's own /pending/<uid>.
   let store = {};
+  let pending = {};
+  let mine = {};
+  let role = null;
   let entries = [];
   let loaded = false;
   let showAll = false;
   let justAdded = null;
-  let stream = null;
+  let streams = [];
+  let session = 0; // bumped on every (re)start so callbacks from old streams are ignored
 
   function rebuild() {
     entries = Object.entries(store)
@@ -328,61 +359,85 @@
 
   const authed = async (path) => `${DB_URL}${path}?auth=${await auth.currentUser.getIdToken()}`;
 
-  async function connect() {
-    stream?.close();
-    const es = stream = new EventSource(await authed("/entries.json"));
-    es.addEventListener("put", (ev) => {
-      const { path, data } = JSON.parse(ev.data);
-      if (path === "/") store = data || {};
-      else applyChild(path.slice(1), data);
+  function startSession() {
+    const id = ++session;
+    closeStreams();
+    if (role === "submitter") {
+      watch(`/pending/${auth.currentUser.uid}`, id, (data) => { mine = data; setAuthState("in"); renderMine(); });
+      return;
+    }
+    watch("/entries", id, (data) => {
+      store = data;
       if (!loaded) { loaded = true; migrateLegacy(); }
-      setStatus("live", "live");
       setAuthState("in");
       rebuild();
     });
+    if (role === "admin") watch("/pending", id, (data) => { pending = data; renderReview(); });
+  }
+
+  function closeStreams() {
+    streams.forEach((es) => es.close());
+    streams = [];
+  }
+
+  // Mirrors one database path live and calls onData with its whole value after every change
+  async function watch(path, id, onData) {
+    const url = await authed(`${path}.json`);
+    if (id !== session) return;
+    const es = new EventSource(url);
+    streams.push(es);
+    let root = {};
+    const apply = (at, data) => {
+      const keys = at.split("/").filter(Boolean);
+      if (!keys.length) return void (root = data ?? {});
+      let node = root;
+      for (const k of keys.slice(0, -1)) node = node[k] ??= {};
+      if (data === null) delete node[keys.at(-1)];
+      else node[keys.at(-1)] = data;
+    };
+    es.addEventListener("put", (ev) => {
+      const { path: at, data } = JSON.parse(ev.data);
+      apply(at, data);
+      setStatus("live", "live");
+      onData(root);
+    });
     es.addEventListener("patch", (ev) => {
-      const { path, data } = JSON.parse(ev.data);
-      if (path === "/") for (const [id, e] of Object.entries(data)) applyChild(id, e);
-      rebuild();
+      const { path: at, data } = JSON.parse(ev.data);
+      for (const [k, v] of Object.entries(data)) apply(`${at}/${k}`, v);
+      onData(root);
     });
     es.addEventListener("open", () => setStatus("live", "live"));
     es.addEventListener("error", async () => {
+      if (id !== session) return;
       setStatus("offline", "off");
       // the browser retries network drops by itself; a refused stream stays closed
-      if (es.readyState !== EventSource.CLOSED || es !== stream) return;
-      const res = await fetch(await authed("/entries.json") + "&shallow=true").catch(() => null);
+      if (es.readyState !== EventSource.CLOSED) return;
+      const res = await fetch(await authed(`${path}.json`) + "&shallow=true").catch(() => null);
+      if (id !== session) return;
       if (res?.status === 401) deny();
-      else setTimeout(() => es === stream && connect(), 5000);
+      else setTimeout(() => id === session && startSession(), 5000);
     });
-    es.addEventListener("cancel", deny);
+    es.addEventListener("cancel", () => id === session && deny());
     // ID tokens last an hour; the database ends the stream when one expires
-    es.addEventListener("auth_revoked", () => { auth.currentUser?.getIdToken(true).then(connect); });
+    es.addEventListener("auth_revoked", () => {
+      if (id === session) auth.currentUser?.getIdToken(true).then(startSession);
+    });
   }
 
   function deny() {
-    stream?.close();
-    stream = null;
+    session++;
+    closeStreams();
     setAuthState("denied", `${auth.currentUser?.email ?? "Dieses Konto"} ist für den Energy Counter nicht freigeschaltet.`);
   }
 
-  function applyChild(path, data) {
-    const [id, field] = path.split("/");
-    if (field) {
-      if (store[id]) store[id][field] = data;
-    } else if (data === null) {
-      delete store[id];
-    } else {
-      store[id] = data;
-    }
-  }
-
-  async function remote(id, method, entry) {
-    const res = await fetch(await authed(`/entries/${encodeURIComponent(id)}.json`), {
+  async function write(path, method, body) {
+    const res = await fetch(await authed(`${path}.json`), {
       method,
-      body: entry ? JSON.stringify(entry) : undefined,
+      body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) throw new Error(res.status);
   }
+  const remote = (id, method, entry) => write(`/entries/${encodeURIComponent(id)}`, method, entry);
 
   async function upload(list) {
     await Promise.all(list.map(({ id, ts, person, brand, flavor, cents }) =>
@@ -478,18 +533,51 @@
 
     const recent = [...entries].reverse();
     const shown = showAll ? recent : recent.slice(0, LOG_SHORT);
-    const fmt = new Intl.DateTimeFormat("de-AT", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
     $("history").innerHTML = shown.length
       ? shown.map((e) => `
         <li>
           <span class="what">${esc(label(e))}
-            <span class="meta">${esc(e.person)}, ${fmt.format(new Date(e.ts))}</span></span>
+            <span class="meta">${esc(e.person)}, ${timeFmt.format(new Date(e.ts))}</span></span>
           <span class="eur">${euro(e.cents)}</span>
           <button class="link" data-id="${esc(e.id)}" type="button">Löschen</button>
         </li>`).join("")
       : `<li class="zero"><span>Hier erscheinen die zuletzt eingetragenen Dosen.</span></li>`;
     $("more").hidden = recent.length <= LOG_SHORT;
     $("more").textContent = showAll ? "Weniger anzeigen" : `Alle ${recent.length} anzeigen`;
+  }
+
+  function renderReview() {
+    const open = Object.entries(pending)
+      .flatMap(([uid, items]) => Object.entries(items ?? {}).map(([id, e]) => ({ uid, id, ...e })))
+      .filter((e) => e.status === "offen" && e.brand in BRANDS)
+      .sort((a, b) => a.ts - b.ts);
+    $("review").hidden = !open.length;
+    $("review-list").innerHTML = open.map((e) => `
+      <li>
+        <span class="what">${esc(label(e))}
+          <span class="meta">${esc(e.person)}, ${timeFmt.format(new Date(e.ts))}, von ${esc(e.by)}</span></span>
+        <span class="eur">${euro(unit(e.brand))}</span>
+        <span class="actions">
+          <button class="link" type="button" data-uid="${esc(e.uid)}" data-id="${esc(e.id)}" data-ok="1">Annehmen</button>
+          <button class="link" type="button" data-uid="${esc(e.uid)}" data-id="${esc(e.id)}" data-ok="0">Ablehnen</button>
+        </span>
+      </li>`).join("");
+  }
+
+  function renderMine() {
+    const list = Object.entries(mine)
+      .map(([id, e]) => ({ id, ...e }))
+      .filter((e) => e.brand in BRANDS)
+      .sort((a, b) => b.ts - a.ts);
+    $("mine-list").innerHTML = list.length
+      ? list.map((e) => `
+        <li>
+          <span class="what">${esc(label(e))}
+            <span class="meta">${esc(e.person)}, ${timeFmt.format(new Date(e.ts))}</span></span>
+          <span class="eur">${euro(e.cents)}</span>
+          <span class="state ${STATUS[e.status] ? e.status : ""}">${STATUS[e.status] ?? ""}</span>
+        </li>`).join("")
+      : `<li class="zero"><span>Noch nichts eingetragen.</span></li>`;
   }
 
   function esc(s) {
@@ -514,6 +602,20 @@
     const id = newId(), entry = { ts: Date.now(), person, brand, flavor, cents: unit(brand) };
     remember("ec-person", person);
     remember("ec-brand", brand);
+    if (role === "submitter") {
+      const submission = { ...entry, by: auth.currentUser.email, status: "offen" };
+      mine[id] = submission;
+      renderMine();
+      try {
+        await write(`/pending/${auth.currentUser.uid}/${id}`, "PUT", submission);
+        toast(`Zur Freigabe geschickt: ${person}, ${label(entry)}`);
+      } catch {
+        delete mine[id];
+        renderMine();
+        toast("Nicht gesendet, keine Verbindung zur Datenbank. Versuch es nochmal.");
+      }
+      return;
+    }
     store[id] = entry;
     justAdded = id;
     rebuild();
@@ -542,6 +644,24 @@
       store[e.id] = backup;
       rebuild();
       toast("Nicht gelöscht, keine Verbindung zur Datenbank. Versuch es nochmal.");
+    }
+  });
+
+  $("review-list").addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("[data-ok]");
+    if (!btn) return;
+    const { uid, id, ok } = btn.dataset;
+    const e = pending[uid]?.[id];
+    if (!e) return;
+    const buttons = btn.parentElement.querySelectorAll("button");
+    buttons.forEach((b) => (b.disabled = true));
+    try {
+      if (ok === "1") await remote(id, "PUT", { ts: e.ts, person: e.person, brand: e.brand, flavor: e.flavor, cents: unit(e.brand) });
+      await write(`/pending/${encodeURIComponent(uid)}/${encodeURIComponent(id)}`, "PATCH", { status: ok === "1" ? "angenommen" : "abgelehnt" });
+      toast(`${ok === "1" ? "Angenommen" : "Abgelehnt"}: ${label(e)}`);
+    } catch {
+      buttons.forEach((b) => (b.disabled = false));
+      toast("Nicht gespeichert, keine Verbindung zur Datenbank. Versuch es nochmal.");
     }
   });
 
@@ -586,15 +706,23 @@
   $("signout").addEventListener("click", () => signOut(auth));
 
   onAuthStateChanged(auth, (user) => {
-    stream?.close();
-    stream = null;
+    session++;
+    closeStreams();
     store = {};
+    pending = {};
+    mine = {};
     loaded = false;
+    role = !user ? null
+      : NEEDS_APPROVAL.includes(user.email) ? "submitter"
+      : user.email === ADMIN ? "admin" : "member";
+    document.body.dataset.role = role ?? "";
     rebuild();
+    renderReview();
+    renderMine();
     if (!user) return setAuthState("out", "Nur für eingeladene Leute. Melde dich mit deinem Google-Konto an, um Dosen zu sehen und einzutragen.");
     $("who").textContent = `Angemeldet als ${user.email}.`;
     setAuthState("loading", "Lade…");
-    connect();
+    startSession();
   });
 
   setAuthState("loading", "Lade…");
