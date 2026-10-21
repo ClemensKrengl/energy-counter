@@ -112,7 +112,7 @@
 
   .log li { grid-template-columns: 1fr auto auto; }
   .log .what { min-width: 0; }
-  .log .meta { display: block; font-size: .875rem; color: var(--muted); }
+  .rows .meta { display: block; font-size: .875rem; color: var(--muted); }
   .link {
     background: none; border: 0; padding: 4px 0; cursor: pointer;
     color: var(--muted); text-decoration: underline; text-underline-offset: 3px;
@@ -293,6 +293,8 @@
     from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 
   const PFAND = 25; // cents per can
+  const CAN_ML = 250; // every can, every brand
+  const CAFFEINE_PER_100ML = 32; // mg, same for every brand
   const PEOPLE = ["Hut", "Karsten", "Sophie", "Kongi", "Noah", "Unbekannt", "Gast"];
   // flavors: name -> can photo in cans/ (null = use the brand's classic can)
   const BRANDS = {
@@ -394,6 +396,8 @@
   const STATUS = { offen: "wartet auf Freigabe", angenommen: "angenommen", abgelehnt: "abgelehnt" };
 
   const $ = (id) => document.getElementById(id);
+  const liters = (cans) => (cans * CAN_ML / 1000).toLocaleString("de-AT", { maximumFractionDigits: 2 }) + " l";
+  const caffeine = (cans) => (cans * CAN_ML * CAFFEINE_PER_100ML / 100).toLocaleString("de-AT") + " mg Koffein";
   const euro = (cents) => (cents / 100).toLocaleString("de-AT", { style: "currency", currency: "EUR" });
   const unit = (brand) => BRANDS[brand].price + PFAND;
   const canImage = (e) => BRANDS[e.brand].flavors[e.flavor] ?? BRANDS[e.brand].can;
@@ -631,7 +635,8 @@
       .sort((a, b) => b[1].n - a[1].n)
       .map(([name, p]) => `
         <li class="${p.n ? "" : "zero"}">
-          <span>${esc(name)}</span>
+          <span class="what">${esc(name)}${p.n ? `
+            <span class="meta">${liters(p.n)}, ${caffeine(p.n)}</span>` : ""}</span>
           <span class="n">${p.n}</span>
           <span class="eur">${euro(p.cents)}</span>
         </li>`).join("");
